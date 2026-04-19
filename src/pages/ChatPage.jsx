@@ -54,6 +54,7 @@ function createAssistantMessage(response) {
     paragraphs: [content, secondary].filter(Boolean),
     sources,
     retrievalMeta: response?.retrievalMeta || {},
+    evidence: response?.rankedEvidence || { publications: [], clinicalTrials: [] },
     metrics: [
       { label: "Publications Reviewed", value: publications || sources.length || "n/a", tone: "secondary" },
       { label: "Clinical Trials Ranked", value: clinicalTrials || "n/a", tone: "primary" },
@@ -72,9 +73,45 @@ function buildWelcomeMessage() {
     ],
     sources: [],
     retrievalMeta: {},
+    evidence: { publications: [], clinicalTrials: [] },
     metrics: [],
     timestamp: "just now",
   };
+}
+
+function EvidenceSection({ title, items, emptyText }) {
+  return (
+    <div className="chat-evidence-section">
+      <h4>{title}</h4>
+      <div className="chat-evidence-list">
+        {items.map((item, index) => (
+          <article key={item.id || `${title}-${index}`} className="chat-evidence-item">
+            <div className="chat-evidence-item-head">
+              <strong>{item.title || `Result ${index + 1}`}</strong>
+              <span className={`evidence-confidence evidence-confidence-${item.ranking?.confidence || "low"}`}>
+                {item.ranking?.confidence || "low"}
+              </span>
+            </div>
+            <p>{sanitizeText(item.snippet || item.summary || item.location || "No summary available.")}</p>
+            <div className="chat-evidence-meta">
+              <span>{item.platform || item.type}</span>
+              {item.year ? <span>{item.year}</span> : null}
+              {item.status ? <span>{item.status}</span> : null}
+              {item.location ? <span>{item.location}</span> : null}
+              {typeof item.score === "number" ? <span>score {item.score}</span> : null}
+            </div>
+            {item.ranking?.explanation ? <div className="chat-evidence-reason">{item.ranking.explanation}</div> : null}
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noreferrer" className="chat-evidence-link">
+                Open source
+              </a>
+            ) : null}
+          </article>
+        ))}
+        {!items.length ? <div className="chat-evidence-empty">{emptyText}</div> : null}
+      </div>
+    </div>
+  );
 }
 
 export function ChatPage() {
@@ -174,7 +211,6 @@ export function ChatPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
-
     const trimmedMessage = message.trim();
     if (!trimmedMessage) {
       return;
@@ -330,6 +366,22 @@ export function ChatPage() {
                         ))}
                       </div>
                     ) : null}
+
+                    <details className="chat-report-panel" open>
+                      <summary>Open Research Report</summary>
+                      <div className="chat-report-grid">
+                        <EvidenceSection
+                          title="Ranked Publications"
+                          items={item.evidence?.publications || []}
+                          emptyText="No ranked publications were returned for this answer."
+                        />
+                        <EvidenceSection
+                          title="Ranked Clinical Trials"
+                          items={item.evidence?.clinicalTrials || []}
+                          emptyText="No ranked clinical trials were returned for this answer."
+                        />
+                      </div>
+                    </details>
 
                     {item.sources?.length ? (
                       <div className="chat-window-citations">

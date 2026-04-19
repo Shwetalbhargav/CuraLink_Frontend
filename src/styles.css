@@ -1010,7 +1010,121 @@ button, input, textarea { font: inherit; }
   font-weight: 800;
 }
 
-.chat-window-citations {
+
+.chat-report-panel {
+  margin-top: 18px;
+  border-top: 1px solid rgba(193, 199, 207, 0.28);
+  padding-top: 16px;
+}
+
+.chat-report-panel summary {
+  cursor: pointer;
+  color: #00334f;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.chat-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.chat-evidence-section h4 {
+  margin: 0 0 10px;
+  font-family: Manrope, Inter, sans-serif;
+  color: #00334f;
+}
+
+.chat-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-evidence-item {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #f8fafb;
+  border: 1px solid rgba(193, 199, 207, 0.35);
+}
+
+.chat-evidence-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-evidence-item p {
+  margin: 10px 0;
+  color: #41474e;
+  line-height: 1.55;
+}
+
+.chat-evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: #52616b;
+  font-size: 0.74rem;
+}
+
+.chat-evidence-reason {
+  margin-top: 10px;
+  color: #006a6a;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.chat-evidence-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: #00334f;
+  font-weight: 700;
+}
+
+.chat-evidence-empty {
+  padding: 16px;
+  border-radius: 14px;
+  background: #f2f4f5;
+  color: #52616b;
+  text-align: center;
+}
+
+.evidence-confidence {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.evidence-confidence-high {
+  background: rgba(0, 106, 106, 0.16);
+  color: #006a6a;
+}
+
+.evidence-confidence-medium {
+  background: rgba(0, 75, 113, 0.14);
+  color: #004b71;
+}
+
+.evidence-confidence-low {
+  background: rgba(113, 120, 127, 0.14);
+  color: #52616b;
+}
+
+@media (max-width: 760px) {
+  .chat-report-grid {
+    grid-template-columns: 1fr;
+  }
+}.chat-window-citations {
   flex-wrap: wrap;
   gap: 10px;
   padding-top: 16px;
