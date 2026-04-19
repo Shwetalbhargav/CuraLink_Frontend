@@ -192,6 +192,23 @@ function buildWelcomeMessage() {
   };
 }
 
+function buildAssistantErrorMessage(message) {
+  return {
+    id: `assistant-error-${Date.now()}`,
+    role: "assistant",
+    title: "Backend Response Issue",
+    paragraphs: [
+      sanitizeText(message || "The session started, but the backend could not complete the first research response."),
+    ],
+    sources: [],
+    rendered: null,
+    retrievalMeta: {},
+    evidence: { publications: [], clinicalTrials: [] },
+    metrics: [],
+    timestamp: timestampLabel(),
+  };
+}
+
 function EvidenceSection({ title, items, emptyText }) {
   return (
     <div className="chat-evidence-section">
@@ -305,6 +322,9 @@ export function ChatPage() {
     setError("");
     setLoading(true);
 
+    let activeSessionId = sessionId;
+    let activeConversationId = conversationId;
+
     const userMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -313,9 +333,6 @@ export function ChatPage() {
     };
 
     try {
-      let activeSessionId = sessionId;
-      let activeConversationId = conversationId;
-
       if (!activeSessionId) {
         const session = await api.createChatSession({
           patientName: trimmedPatientName,
@@ -328,6 +345,10 @@ export function ChatPage() {
         activeConversationId = session.conversationId || "";
         setSessionId(activeSessionId);
         setConversationId(activeConversationId);
+        setHasStarted(true);
+        setPatientName(trimmedPatientName);
+        setLocation(trimmedLocation);
+        setDisease(trimmedDisease);
       }
 
       setMessages((previous) => [...previous, userMessage]);
@@ -349,8 +370,11 @@ export function ChatPage() {
       setDisease(trimmedDisease);
       setMessage("");
     } catch (err) {
-      setMessages((previous) => previous.filter((item) => item.id !== userMessage.id));
       setError(err.message);
+      if (activeSessionId || sessionId) {
+        setHasStarted(true);
+        setMessages((previous) => [...previous, buildAssistantErrorMessage(err.message)]);
+      }
     } finally {
       setLoading(false);
     }
