@@ -113,6 +113,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  compareResearch: (payload) =>
+    request("/research/compare", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 export { API_BASE_URL, DEFAULT_API_BASE_URL };
