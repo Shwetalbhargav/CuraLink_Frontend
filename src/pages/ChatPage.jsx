@@ -37,6 +37,116 @@ function sanitizeText(value) {
     .trim();
 }
 
+function hasEvidenceItems(evidence) {
+  return Boolean(
+    (Array.isArray(evidence?.publications) && evidence.publications.length) ||
+      (Array.isArray(evidence?.clinicalTrials) && evidence.clinicalTrials.length)
+  );
+}
+
+function buildFallbackEvidence(response, sources, insights, rendered) {
+  const sections = rendered?.rendering?.sections || [];
+  const researchInsightsSection = sections.find((section) => section.id === "research-insights");
+  const clinicalTrialsSection = sections.find((section) => section.id === "clinical-trials");
+  const researchInsightItems = researchInsightsSection?.items || response?.answer?.researchInsights || [];
+  const clinicalTrialItems = clinicalTrialsSection?.items || response?.answer?.clinicalTrials || [];
+
+  const publicationFallbackFromInsights = researchInsightItems.map((item, index) => ({
+    id: item.sourceIds?.[0] || item.heading || `insight-${index}`,
+    type: "publication",
+    platform: "Research insight",
+    title: item.heading || `Insight ${index + 1}`,
+    year: null,
+    url: findSourceUrlByIdOrTitle(sources, item.sourceIds, item.heading),
+    snippet: sanitizeText(item.summary || "Source-backed evidence from the backend answer."),
+    score: null,
+    ranking: {
+      confidence: index === 0 ? "medium" : "low",
+      explanation: "Derived from backend research insight sections",
+    },
+  }));
+
+  const publicationFallbackFromSources = sources.map((source, index) => ({
+    id: source.id || `source-${index}`,
+    type: "publication",
+    platform: source.platform || "Research source",
+    title: source.title || `Source ${index + 1}`,
+    year: source.year || null,
+    url: source.url || "",
+    snippet: sanitizeText(source.snippet || researchInsightItems[index]?.summary || insights[index]?.summary || "Source-backed evidence from the current answer."),
+    score: null,
+    ranking: {
+      confidence: index === 0 ? "medium" : "low",
+      explanation: index === 0 ? "Included in rendered source cards from the backend response" : "Source surfaced in rendered answer output",
+    },
+  }));
+
+  const trialFallback = clinicalTrialItems.map((trial, index) => ({
+    id: `${trial.title || "trial"}-${index}`,
+    type: "clinical-trial",
+    platform: "ClinicalTrials.gov",
+    title: trial.title || `Trial ${index + 1}`,
+    status: trial.status || "",
+    location: trial.location || "",
+    url: findSourceUrlByIdOrTitle(sources, trial.sourceIds, trial.title),
+    snippet: sanitizeText(trial.summary || "Clinical trial summary from backend answer."),
+    score: null,
+    ranking: {
+      confidence: "medium",
+      explanation: "Derived from clinical trial summary returned in backend answer",
+    },
+  }));
+
+  return {
+    publications: publicationFallbackFromInsights.length ? publicationFallbackFromInsights : publicationFallbackFromSources,
+    clinicalTrials: trialFallback,
+  };
+}
+
+function findSourceUrlByIdOrTitle(sources, sourceIds = [], title = "") {
+  const normalizedTitle = normalizeTitle(title);
+  const sourceIdSet = new Set((Array.isArray(sourceIds) ? sourceIds : []).filter(Boolean));
+  const directMatch = sources.find((source) => sourceIdSet.has(source.id) && source.url);
+  if (directMatch?.url) {
+    return directMatch.url;
+  }
+
+  const titleMatch = sources.find((source) => normalizeTitle(source.title) === normalizedTitle && source.url);
+  return titleMatch?.url || "";
+}
+
+function normalizeTitle(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function resolveEvidence(response, sources, insights, rendered) {
+  const rankedEvidence = response?.rankedEvidence;
+  if (hasEvidenceItems(rankedEvidence)) {
+    return rankedEvidence;
+  }
+
+  return buildFallbackEvidence(response, sources, insights, rendered);
+}
+
+function resolveCitationUrl(source, evidence) {
+  if (source.url) {
+    return source.url;
+  }
+
+  const evidenceItems = [...(evidence?.publications || []), ...(evidence?.clinicalTrials || [])];
+  const sourceKey = normalizeTitle(source.title);
+  const sourceId = source.id || "";
+  const evidenceMatch = evidenceItems.find((item) => {
+    if (item.url && sourceId && item.id === sourceId) {
+      return true;
+    }
+
+    return item.url && normalizeTitle(item.title) === sourceKey;
+  });
+
+  return evidenceMatch?.url || "";
+}
+
 function createAssistantMessage(response) {
   const answer = response?.answer || {};
   const rendered = response?.rendered || {};
@@ -46,6 +156,7 @@ function createAssistantMessage(response) {
   const secondary = sanitizeText(insights[0]?.summary || insights[0]?.content || "");
   const publications = response?.retrievalMeta?.returned?.publications ?? 0;
   const clinicalTrials = response?.retrievalMeta?.returned?.clinicalTrials ?? 0;
+  const rankedEvidence = resolveEvidence(response, sources, insights, rendered);
 
   return {
     id: `assistant-${Date.now()}`,
@@ -53,8 +164,9 @@ function createAssistantMessage(response) {
     title: "Precision Analysis",
     paragraphs: [content, secondary].filter(Boolean),
     sources,
+    rendered,
     retrievalMeta: response?.retrievalMeta || {},
-    evidence: response?.rankedEvidence || { publications: [], clinicalTrials: [] },
+    evidence: rankedEvidence,
     metrics: [
       { label: "Publications Reviewed", value: publications || sources.length || "n/a", tone: "secondary" },
       { label: "Clinical Trials Ranked", value: clinicalTrials || "n/a", tone: "primary" },
@@ -72,6 +184,7 @@ function buildWelcomeMessage() {
       "Enter a disease area, location, and research question. I will retrieve recent studies, clinical trials, and synthesis-ready evidence.",
     ],
     sources: [],
+    rendered: null,
     retrievalMeta: {},
     evidence: { publications: [], clinicalTrials: [] },
     metrics: [],
@@ -114,6 +227,49 @@ function EvidenceSection({ title, items, emptyText }) {
   );
 }
 
+function AnalysisModal({ message, onClose }) {
+  if (!message) {
+    return null;
+  }
+
+  const sections = message.rendered?.rendering?.sections || [];
+
+  return (
+    <div className="chat-analysis-modal-backdrop" onClick={onClose}>
+      <div className="chat-analysis-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="chat-analysis-modal-header">
+          <div>
+            <h3>Backend Analysis Report</h3>
+            <span>{message.title}</span>
+          </div>
+          <button type="button" className="chat-analysis-modal-close" onClick={onClose}>X</button>
+        </div>
+        <div className="chat-analysis-modal-content">
+          {(message.paragraphs || []).map((paragraph, index) => (
+            <p key={`p-${index}`}>{paragraph}</p>
+          ))}
+          {sections.map((section, index) => (
+            <div key={section.id || index} className="chat-analysis-modal-section">
+              <h4>{section.title || `Section ${index + 1}`}</h4>
+              {section.content ? <p>{sanitizeText(section.content)}</p> : null}
+              {Array.isArray(section.items) ? (
+                <div className="chat-analysis-modal-items">
+                  {section.items.map((item, itemIndex) => (
+                    <div key={item.heading || item.title || itemIndex} className="chat-analysis-modal-item">
+                      <strong>{item.heading || item.title || item.status || `Item ${itemIndex + 1}`}</strong>
+                      <span>{sanitizeText(item.summary || item.content || item.location || "")}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChatPage() {
   const [sessionId, setSessionId] = useState("");
   const [conversationId, setConversationId] = useState("");
@@ -122,6 +278,7 @@ export function ChatPage() {
   const [disease, setDisease] = useState("");
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([buildWelcomeMessage()]);
+  const [selectedAnalysis, setSelectedAnalysis] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
@@ -367,30 +524,39 @@ export function ChatPage() {
                       </div>
                     ) : null}
 
+                    <div className="chat-report-actions">
+                      <button type="button" className="chat-report-open-button" onClick={() => setSelectedAnalysis(item)}>
+                        Open Backend Analysis Report
+                      </button>
+                    </div>
+
                     <details className="chat-report-panel" open>
                       <summary>Open Research Report</summary>
                       <div className="chat-report-grid">
-                        <EvidenceSection
-                          title="Ranked Publications"
-                          items={item.evidence?.publications || []}
-                          emptyText="No ranked publications were returned for this answer."
-                        />
-                        <EvidenceSection
-                          title="Ranked Clinical Trials"
-                          items={item.evidence?.clinicalTrials || []}
-                          emptyText="No ranked clinical trials were returned for this answer."
-                        />
+                        <EvidenceSection title="Ranked Publications" items={item.evidence?.publications || []} emptyText="No ranked publications were returned for this answer." />
+                        <EvidenceSection title="Ranked Clinical Trials" items={item.evidence?.clinicalTrials || []} emptyText="No ranked clinical trials were returned for this answer." />
                       </div>
                     </details>
 
                     {item.sources?.length ? (
                       <div className="chat-window-citations">
-                        {item.sources.slice(0, 4).map((source, index) => (
-                          <button key={source.id || source.url || index} type="button" className="chat-window-citation-chip">
-                            <span>DOC</span>
-                            <span>{source.title || `Source ${index + 1}`}</span>
-                          </button>
-                        ))}
+                        {item.sources.slice(0, 4).map((source, index) => {
+                          const label = source.title || `Source ${index + 1}`;
+
+                          const sourceUrl = resolveCitationUrl(source, item.evidence);
+
+                          return sourceUrl ? (
+                            <a key={source.id || sourceUrl || index} href={sourceUrl} target="_blank" rel="noreferrer" className="chat-window-citation-chip" title={label}>
+                              <span>DOC</span>
+                              <span>{label}</span>
+                            </a>
+                          ) : (
+                            <button key={source.id || index} type="button" className="chat-window-citation-chip chat-window-citation-chip-disabled" title="Source URL unavailable">
+                              <span>DOC</span>
+                              <span>{label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -424,14 +590,7 @@ export function ChatPage() {
           <div className="chat-window-composer-zone">
             <form className="chat-window-composer" onSubmit={handleSubmit}>
               <button type="button" className="composer-icon-button">+</button>
-              <textarea
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                placeholder={hasStarted ? "Ask a follow-up question..." : "Enter the research question to start the conversation..."}
-                rows={1}
-                disabled={loading}
-                className="chat-window-composer-input"
-              />
+              <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={hasStarted ? "Ask a follow-up question..." : "Enter the research question to start the conversation..."} rows={1} disabled={loading} className="chat-window-composer-input" />
               <button type="button" className="composer-icon-button">M</button>
               <button type="submit" className="chat-window-send-button" disabled={loading || !message.trim() || (!hasStarted && (!location.trim() || !disease.trim()))}>
                 &gt;
@@ -454,6 +613,8 @@ export function ChatPage() {
           </div>
         </main>
       </div>
+
+      <AnalysisModal message={selectedAnalysis} onClose={() => setSelectedAnalysis(null)} />
     </section>
   );
 }
